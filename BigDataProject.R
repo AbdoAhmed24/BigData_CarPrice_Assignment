@@ -1,3 +1,19 @@
+# ---------------------------
+# Install required packages (uncomment if not installed) argoko
+# ---------------------------
+# install.packages("tidyverse")
+# install.packages("caret")
+# install.packages("rpart")
+# install.packages("rpart.plot")
+# install.packages("arules")
+# install.packages("cluster")
+# install.packages("factoextra")
+# install.packages("ggpubr")
+# install.packages("glmnet")
+# install.packages("car")
+# install.packages("randomForest")
+# install.packages("corrplot")
+
 # car_prices_project_adapted.R
 # R 4.5.1 compatible
 library(tidyverse)
