@@ -25,9 +25,11 @@ library(cluster)
 library(factoextra)
 library(ggpubr)
 library(glmnet)
-library(car)         # for VIF
+library(car) # for VIF
 library(randomForest)
 library(corrplot)
+library(ggplot2)
+library(fmsb)
 
 set.seed(123)
 
@@ -46,13 +48,17 @@ names(df)
 # ---------------------------
 names(df) <- tolower(names(df))
 
-factor_cols <- c("fueltype","aspiration","doornumber","carbody",
-                 "drivewheel","enginelocation","enginetype",
-                 "cylindernumber","fuelsystem")
+factor_cols <- c(
+  "fueltype", "aspiration", "doornumber", "carbody",
+  "drivewheel", "enginelocation", "enginetype",
+  "cylindernumber", "fuelsystem"
+)
 factor_cols <- intersect(factor_cols, names(df))
 df[factor_cols] <- map(df[factor_cols], as.factor)
 
-df <- df %>% mutate(brand = word(carname, 1)) %>% mutate(brand = as.factor(brand))
+df <- df %>%
+  mutate(brand = word(carname, 1)) %>%
+  mutate(brand = as.factor(brand))
 
 df <- df %>%
   mutate(
@@ -78,7 +84,7 @@ print(missing_pct[missing_pct > 0])
 num_cols <- names(df)[sapply(df, is.numeric)]
 df[num_cols] <- df[num_cols] %>% map_df(~ ifelse(is.na(.x), median(.x, na.rm = TRUE), .x))
 
-for(cn in names(df)[sapply(df, is.factor)]) {
+for (cn in names(df)[sapply(df, is.factor)]) {
   if (any(is.na(df[[cn]]))) {
     mode_val <- names(sort(table(df[[cn]]), decreasing = TRUE))[1]
     df[[cn]][is.na(df[[cn]])] <- mode_val
@@ -89,7 +95,9 @@ for(cn in names(df)[sapply(df, is.factor)]) {
 # 4. Outliers handling (cap at 1%/99%)
 # ---------------------------
 cap_at_quantiles <- function(x) {
-  if(!is.numeric(x)) return(x)
+  if (!is.numeric(x)) {
+    return(x)
+  }
   q <- quantile(x, probs = c(0.01, 0.99), na.rm = TRUE)
   x[x < q[1]] <- q[1]
   x[x > q[2]] <- q[2]
@@ -102,9 +110,10 @@ df[num_cols] <- df[num_cols] %>% map_df(cap_at_quantiles)
 # ---------------------------
 df <- df %>%
   mutate(price_bucket = cut(price,
-                            breaks = quantile(price, probs = seq(0,1,0.25), na.rm = TRUE),
-                            include.lowest = TRUE,
-                            labels = c("Low","Medium","High","VeryHigh"))) %>%
+    breaks = quantile(price, probs = seq(0, 1, 0.25), na.rm = TRUE),
+    include.lowest = TRUE,
+    labels = c("Low", "Medium", "High", "VeryHigh")
+  )) %>%
   mutate(price_bucket = as.factor(price_bucket))
 
 df <- df %>% mutate(log_price = log(price + 1))
@@ -112,17 +121,28 @@ df <- df %>% mutate(log_price = log(price + 1))
 # ---------------------------
 # 6. Exploratory Data Analysis (EDA)
 # ---------------------------
-p1 <- ggplot(df, aes(price)) + geom_histogram(bins = 30, alpha=0.6) + ggtitle("Price distribution")
+p1 <- ggplot(df, aes(price)) +
+  geom_histogram(bins = 30, alpha = 0.6) +
+  ggtitle("Price distribution")
 print(p1)
 
-p2 <- ggplot(df, aes(horsepower, price)) + geom_point(alpha=0.6) + geom_smooth(method="loess") + ggtitle("Price vs Horsepower")
+p2 <- ggplot(df, aes(horsepower, price)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "loess") +
+  ggtitle("Price vs Horsepower")
 print(p2)
 
-p3 <- ggplot(df, aes(fueltype, price)) + geom_boxplot() + ggtitle("Price by Fuel Type")
+p3 <- ggplot(df, aes(fueltype, price)) +
+  geom_boxplot() +
+  ggtitle("Price by Fuel Type")
 print(p3)
 
-top_brands <- df %>% count(brand, sort = TRUE) %>% top_n(10, n)
-p4 <- ggplot(df %>% filter(brand %in% top_brands$brand), aes(brand)) + geom_bar() + ggtitle("Top 10 brands count")
+top_brands <- df %>%
+  count(brand, sort = TRUE) %>%
+  top_n(10, n)
+p4 <- ggplot(df %>% filter(brand %in% top_brands$brand), aes(brand)) +
+  geom_bar() +
+  ggtitle("Top 10 brands count")
 print(p4)
 
 num_df <- df %>% select(where(is.numeric))
@@ -133,7 +153,7 @@ corrplot(cor_mat, method = "color", type = "lower", tl.cex = 0.7)
 # ---------------------------
 # 7. Hypothesis testing
 # ---------------------------
-if(all(c("fueltype","price") %in% names(df))) {
+if (all(c("fueltype", "price") %in% names(df))) {
   fuel_counts <- df %>% count(fueltype, sort = TRUE)
   top2fuel <- fuel_counts$fueltype[1:2]
   cat("Top 2 fuels used for t-test:", top2fuel, "\n")
@@ -141,18 +161,23 @@ if(all(c("fueltype","price") %in% names(df))) {
   print(res_t)
 }
 
-if("carbody" %in% names(df)) {
+if ("carbody" %in% names(df)) {
   aov_res <- aov(price ~ carbody, data = df)
   print(summary(aov_res))
-  if(summary(aov_res)[[1]]$`Pr(>F)`[1] < 0.05) {
+  if (summary(aov_res)[[1]]$`Pr(>F)`[1] < 0.05) {
     print(TukeyHSD(aov_res))
   }
 }
 
-if(all(c("brand","drivewheel") %in% names(df))) {
-  topb <- df %>% count(brand, sort = TRUE) %>% slice(1:6) %>% pull(brand)
-  tab <- table(df %>% filter(brand %in% topb) %>% pull(brand),
-               df %>% filter(brand %in% topb) %>% pull(drivewheel))
+if (all(c("brand", "drivewheel") %in% names(df))) {
+  topb <- df %>%
+    count(brand, sort = TRUE) %>%
+    slice(1:6) %>%
+    pull(brand)
+  tab <- table(
+    df %>% filter(brand %in% topb) %>% pull(brand),
+    df %>% filter(brand %in% topb) %>% pull(drivewheel)
+  )
   print(tab)
   print(chisq.test(tab))
 }
@@ -160,9 +185,11 @@ if(all(c("brand","drivewheel") %in% names(df))) {
 # ---------------------------
 # 8. Prepare dataset for ML
 # ---------------------------
-ml_vars <- c("price","horsepower","enginesize","curbweight","citympg","highwaympg","carwidth","carlength","brand")
+ml_vars <- c("price", "horsepower", "enginesize", "curbweight", "citympg", "highwaympg", "carwidth", "carlength", "brand")
 ml_vars <- intersect(ml_vars, names(df))
-ml_df <- df %>% select(all_of(ml_vars)) %>% na.omit()
+ml_df <- df %>%
+  select(all_of(ml_vars)) %>%
+  na.omit()
 
 # Robust one-hot encoding
 dummies <- dummyVars(price ~ ., data = ml_df, fullRank = TRUE)
@@ -174,11 +201,11 @@ ml_data <- bind_cols(X, price = y)
 set.seed(123)
 trainIndex <- createDataPartition(ml_data$price, p = 0.8, list = FALSE)
 train <- ml_data[trainIndex, ]
-test  <- ml_data[-trainIndex, ]
+test <- ml_data[-trainIndex, ]
 
 # Ensure test has same columns as train
 missing_cols <- setdiff(names(train), names(test))
-for(col in missing_cols) test[[col]] <- 0
+for (col in missing_cols) test[[col]] <- 0
 test <- test[, names(train)]
 
 # ---------------------------
@@ -189,11 +216,12 @@ lm_mod <- lm(price ~ ., data = train)
 summary(lm_mod)
 pred_lm <- predict(lm_mod, newdata = test)
 lm_perf <- postResample(pred_lm, test$price)
-cat("Linear regression performance (RMSE, R-squared, MAE):\n"); print(lm_perf)
+cat("Linear regression performance (RMSE, R-squared, MAE):\n")
+print(lm_perf)
 
 # VIF (robust to aliased coefficients)
 coefs_na <- names(coef(lm_mod))[is.na(coef(lm_mod))]
-if(length(coefs_na) > 0){
+if (length(coefs_na) > 0) {
   cat("Aliased coefficients detected and removed for VIF calculation:\n")
   print(coefs_na)
   train_vif <- train %>% select(-all_of(coefs_na))
@@ -213,49 +241,207 @@ set.seed(42)
 lasso_mod <- train(price ~ ., data = train, method = "glmnet", trControl = train_ctrl, tuneLength = 10)
 pred_lasso <- predict(lasso_mod, newdata = test)
 lasso_perf <- postResample(pred_lasso, test$price)
-cat("LASSO performance:\n"); print(lasso_perf)
+cat("LASSO performance:\n")
+print(lasso_perf)
 
 # Decision Tree
 tree_mod <- rpart(price ~ ., data = train, control = rpart.control(cp = 0.01))
 rpart.plot(tree_mod, main = "Decision Tree for Price")
 pred_tree <- predict(tree_mod, newdata = test)
 tree_perf <- postResample(pred_tree, test$price)
-cat("Decision tree performance:\n"); print(tree_perf)
+cat("Decision tree performance:\n")
+print(tree_perf)
 
 # Random Forest
 set.seed(123)
 rf_mod <- randomForest(price ~ ., data = train, ntree = 200, importance = TRUE)
 pred_rf <- predict(rf_mod, newdata = test)
 rf_perf <- postResample(pred_rf, test$price)
-cat("Random Forest performance:\n"); print(rf_perf)
+cat("Random Forest performance:\n")
+print(rf_perf)
 importance(rf_mod)
 varImpPlot(rf_mod)
 
 # ---------------------------
-# 10. Clustering
+# 10. Clustering (K-Means)
 # ---------------------------
-clus_vars <- c("horsepower","enginesize","curbweight","price")
+
+# Step 1: Prepare clustering data
+clus_vars <- c("horsepower", "enginesize", "curbweight", "citympg", "highwaympg", "price")
 clus_vars <- intersect(clus_vars, names(df))
 clus_df <- na.omit(df[clus_vars])
+
+# Step 2: Standardize the data (K-means is sensitive to scale)
 clus_scaled <- scale(clus_df)
 
+# Step 3: Determine Optimal Number of Clusters (Elbow Method)
+wss <- numeric(15)
+for (k in 1:15) {
+  set.seed(123)
+  kmeans_result <- kmeans(clus_scaled, centers = k, nstart = 10)
+  wss[k] <- kmeans_result$tot.withinss
+}
+
+# Plot elbow curve
+elbow_data <- data.frame(Clusters = 1:15, WSS = wss)
+p_elbow <- ggplot(elbow_data, aes(x = Clusters, y = WSS)) +
+  geom_line(color = "blue", linewidth = 1.2) +
+  geom_point(color = "red", size = 3) +
+  labs(
+    title = "Elbow Method for Optimal K",
+    x = "Number of Clusters (K)",
+    y = "Within-Cluster Sum of Squares (WSS)"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+print(p_elbow)
+
+# Silhouette method for validation
 fviz_nbclust(clus_scaled, kmeans, method = "silhouette")
-km <- kmeans(clus_scaled, centers = 3, nstart = 25)
-table(km$cluster)
-fviz_cluster(km, data = clus_scaled)
 
-# Initialize cluster column
+# Step 4: Apply K-Means Clustering (k=3 based on elbow/silhouette)
+k <- 2
+set.seed(123)
+km <- kmeans(clus_scaled, centers = k, nstart = 25)
+
+# Step 5: Analyze Clusters
+cat("Cluster Sizes:\n")
+print(table(km$cluster))
+
+cat("\nCluster Centers (Scaled):\n")
+print(km$centers)
+
+# Convert scaled centers back to original scale
+original_centers <- t(apply(
+  km$centers, 1,
+  function(r) {
+    r * attr(clus_scaled, "scaled:scale") +
+      attr(clus_scaled, "scaled:center")
+  }
+))
+cat("\nCluster Centers (Original Scale):\n")
+print(original_centers)
+
+# Step 6: Visualize Clusters
+# PCA for 2D visualization
+pca_result <- prcomp(clus_scaled)
+pca_df <- data.frame(
+  PC1 = pca_result$x[, 1],
+  PC2 = pca_result$x[, 2],
+  Cluster = as.factor(km$cluster)
+)
+
+p_pca <- ggplot(pca_df, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point(alpha = 0.7, size = 2) +
+  stat_ellipse(level = 0.95) +
+  labs(
+    title = "K-Means Clustering Results (PCA Reduced)",
+    x = paste("PC1 (", round(summary(pca_result)$importance[2, 1] * 100, 1), "%)", sep = ""),
+    y = paste("PC2 (", round(summary(pca_result)$importance[2, 2] * 100, 1), "%)", sep = "")
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+print(p_pca)
+
+# Factoextra cluster visualization
+fviz_cluster(km, data = clus_scaled, main = "K-Means Cluster Visualization")
+
+# Feature pair visualizations
+clus_df$cluster <- as.factor(km$cluster)
+
+p_hp_price <- ggplot(clus_df, aes(x = horsepower, y = price, color = cluster)) +
+  geom_point(alpha = 0.7) +
+  labs(title = "Clusters: Horsepower vs Price") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+print(p_hp_price)
+
+p_engine_price <- ggplot(clus_df, aes(x = enginesize, y = price, color = cluster)) +
+  geom_point(alpha = 0.7) +
+  labs(title = "Clusters: Engine Size vs Price") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+print(p_engine_price)
+
+# Step 7: Interpret Clusters
+cluster_summary <- aggregate(. ~ cluster, data = clus_df, FUN = mean)
+cat("\nCluster Summary (Mean Values):\n")
+print(cluster_summary)
+
+# Label clusters based on characteristics
+cluster_labels <- data.frame(
+  cluster = as.factor(1:k),
+  label = c("Economy/Mid-Range Cars", "Luxury/Performance Cars")
+)
+cat("\nCluster Labels:\n")
+print(cluster_labels)
+
+# Step 8: Radar Chart for Cluster Characteristics
+key_features <- c("horsepower", "enginesize", "curbweight", "citympg", "price")
+key_features <- intersect(key_features, names(cluster_summary))
+radar_data <- cluster_summary[, c("cluster", key_features)]
+
+# Normalize for radar chart
+max_values <- apply(radar_data[, -1], 2, max)
+min_values <- apply(radar_data[, -1], 2, min)
+radar_scaled <- as.data.frame(scale(radar_data[, -1],
+  center = min_values,
+  scale = max_values - min_values
+))
+radar_scaled <- rbind(
+  rep(1, ncol(radar_scaled)),
+  rep(0, ncol(radar_scaled)),
+  radar_scaled
+)
+
+# Create radar chart
+colors <- c("red", "blue")[1:k]
+radarchart(radar_scaled,
+  axistype = 1,
+  pcol = colors,
+  pfcol = adjustcolor(colors, alpha.f = 0.3),
+  plwd = 2,
+  cglcol = "grey",
+  cglty = 1,
+  axislabcol = "grey",
+  caxislabels = seq(0, 1, 0.25),
+  cglwd = 0.8,
+  vlcex = 0.8,
+  title = "Cluster Characteristics Radar Chart"
+)
+legend(
+  x = 1.2, y = 1,
+  legend = paste("Cluster", 1:k, ":", cluster_labels$label),
+  bty = "n", pch = 20, col = colors, cex = 0.8
+)
+
+# Step 9: ANOVA to validate cluster differences
+cat("\n=== ANOVA Results (Checking Cluster Differences) ===\n")
+for (feature in c("horsepower", "enginesize", "price")) {
+  cat(paste("\nANOVA for", feature, ":\n"))
+  anova_test <- aov(clus_df[[feature]] ~ clus_df$cluster)
+  print(summary(anova_test))
+}
+
+# Step 10: Assign cluster to main dataframe
 df$km_cluster <- NA_integer_
-
-# Assign only for the rows actually used in clustering
 df$km_cluster[as.numeric(rownames(clus_df))] <- km$cluster
+
+# Save clustering outputs
+write_csv(as.data.frame(original_centers), "cluster_centers.csv")
+
+cat("\n=== CLUSTERING ANALYSIS SUMMARY ===\n")
+cat("Number of clusters used:", k, "\n")
+cat("Cluster sizes:\n")
+print(table(km$cluster))
 
 # ---------------------------
 # 11. Association rules
 # ---------------------------
 trans_df <- df %>%
   mutate(brand_top = if_else(brand %in% (df %>% count(brand) %>% arrange(desc(n)) %>% slice(1:10) %>% pull(brand)),
-                             as.character(brand), "Other")) %>%
+    as.character(brand), "Other"
+  )) %>%
   transmute(price_bucket, brand_top, carbody, fueltype) %>%
   mutate_all(as.factor)
 
