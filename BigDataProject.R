@@ -13,6 +13,7 @@
 # install.packages("car")
 # install.packages("randomForest")
 # install.packages("corrplot")
+# install.packages("e1071")
 
 # car_prices_project_adapted.R
 # R 4.5.1 compatible
@@ -30,6 +31,7 @@ library(randomForest)
 library(corrplot)
 library(ggplot2)
 library(fmsb)
+library(e1071)
 
 set.seed(123)
 
@@ -92,18 +94,27 @@ for (cn in names(df)[sapply(df, is.factor)]) {
 }
 
 # ---------------------------
-# 4. Outliers handling (cap at 1%/99%)
+# 4. Outliers handling (IQR Method)
 # ---------------------------
-cap_at_quantiles <- function(x) {
-  if (!is.numeric(x)) {
-    return(x)
-  }
-  q <- quantile(x, probs = c(0.01, 0.99), na.rm = TRUE)
-  x[x < q[1]] <- q[1]
-  x[x > q[2]] <- q[2]
+cap_outliers_iqr <- function(x) {
+  if(!is.numeric(x)) return(x)
+  q1 <- quantile(x, 0.25, na.rm = TRUE)
+  q3 <- quantile(x, 0.75, na.rm = TRUE)
+  iqr_val <- q3 - q1
+  
+  lower_bound <- q1 - 1.5 * iqr_val
+  upper_bound <- q3 + 1.5 * iqr_val
+  
+  x[x < lower_bound] <- lower_bound
+  x[x > upper_bound] <- upper_bound
   return(x)
 }
-df[num_cols] <- df[num_cols] %>% map_df(cap_at_quantiles)
+
+# Apply to predictors only (exclude 'price' as high prices are valid)
+predictors <- setdiff(num_cols, "price")
+df[predictors] <- df[predictors] %>% map_df(cap_outliers_iqr)
+
+cat("IQR Outlier Capping applied to predictors. Price was left untouched.\n")
 
 # ---------------------------
 # 5. Feature engineering
@@ -185,21 +196,22 @@ if (all(c("brand", "drivewheel") %in% names(df))) {
 # ---------------------------
 # 8. Prepare dataset for ML
 # ---------------------------
-ml_vars <- c("price", "horsepower", "enginesize", "curbweight", "citympg", "highwaympg", "carwidth", "carlength", "brand")
+ml_vars <- c("log_price", "horsepower", "enginesize", "curbweight", "citympg", "highwaympg", "carwidth", "carlength", "brand")
 ml_vars <- intersect(ml_vars, names(df))
 ml_df <- df %>%
   select(all_of(ml_vars)) %>%
   na.omit()
 
 # Robust one-hot encoding
-dummies <- dummyVars(price ~ ., data = ml_df, fullRank = TRUE)
+# Robust one-hot encoding
+dummies <- dummyVars(log_price ~ ., data = ml_df, fullRank = TRUE)
 X <- predict(dummies, newdata = ml_df) %>% as.data.frame()
-y <- ml_df$price
-ml_data <- bind_cols(X, price = y)
+y <- ml_df$log_price
+ml_data <- bind_cols(X, log_price = y)
 
 # Train-test split
 set.seed(123)
-trainIndex <- createDataPartition(ml_data$price, p = 0.8, list = FALSE)
+trainIndex <- createDataPartition(ml_data$log_price, p = 0.8, list = FALSE)
 train <- ml_data[trainIndex, ]
 test <- ml_data[-trainIndex, ]
 
@@ -212,55 +224,84 @@ test <- test[, names(train)]
 # 9. Models & evaluation
 # ---------------------------
 # Linear Regression
-lm_mod <- lm(price ~ ., data = train)
+lm_mod <- lm(log_price ~ ., data = train)
 summary(lm_mod)
-pred_lm <- predict(lm_mod, newdata = test)
-lm_perf <- postResample(pred_lm, test$price)
-cat("Linear regression performance (RMSE, R-squared, MAE):\n")
-print(lm_perf)
 
-# VIF (robust to aliased coefficients)
-coefs_na <- names(coef(lm_mod))[is.na(coef(lm_mod))]
-if (length(coefs_na) > 0) {
-  cat("Aliased coefficients detected and removed for VIF calculation:\n")
-  print(coefs_na)
-  train_vif <- train %>% select(-all_of(coefs_na))
-  lm_mod_vif <- lm(price ~ ., data = train_vif)
-  vif_vals <- vif(lm_mod_vif)
-} else {
-  vif_vals <- vif(lm_mod)
-}
-print(vif_vals)
+# Calculate Training Performance (Converted back to Real $)
+pred_lm_train_log <- predict(lm_mod, newdata = train)
+pred_lm_train_real <- exp(pred_lm_train_log) - 1
+# We must compare against the ORIGINAL price, not the log_price
+# Since 'train' now has log_price, we approximate the real price with exp(log_price)-1
+actual_train_real <- exp(train$log_price) - 1 
 
-plot(lm_mod, which = 1)
-plot(lm_mod, which = 2)
+lm_train_perf <- postResample(pred_lm_train_real, actual_train_real)
+cat("Linear regression TRAINING performance (Real $ Scale):\n"); print(lm_train_perf)
 
-# LASSO
-train_ctrl <- trainControl(method = "cv", number = 5)
-set.seed(42)
-lasso_mod <- train(price ~ ., data = train, method = "glmnet", trControl = train_ctrl, tuneLength = 10)
-pred_lasso <- predict(lasso_mod, newdata = test)
-lasso_perf <- postResample(pred_lasso, test$price)
-cat("LASSO performance:\n")
-print(lasso_perf)
+# Calculate Test Performance (Converted back to Real $)
+pred_lm_log <- predict(lm_mod, newdata = test)
+pred_lm_real <- exp(pred_lm_log) - 1
+actual_test_real <- exp(test$log_price) - 1
+
+lm_perf <- postResample(pred_lm_real, actual_test_real)
+cat("Linear regression TEST performance (Real $ Scale):\n"); print(lm_perf)
+
+
 
 # Decision Tree
-tree_mod <- rpart(price ~ ., data = train, control = rpart.control(cp = 0.01))
+tree_mod <- rpart(log_price ~ ., data = train, control = rpart.control(cp = 0.01))
 rpart.plot(tree_mod, main = "Decision Tree for Price")
-pred_tree <- predict(tree_mod, newdata = test)
-tree_perf <- postResample(pred_tree, test$price)
-cat("Decision tree performance:\n")
-print(tree_perf)
+pred_tree_log <- predict(tree_mod, newdata = test)
+pred_tree_real <- exp(pred_tree_log) - 1
+
+tree_perf <- postResample(pred_tree_real, actual_test_real)
+cat("Decision tree performance (Real $ Scale):\n"); print(tree_perf)
 
 # Random Forest
 set.seed(123)
-rf_mod <- randomForest(price ~ ., data = train, ntree = 200, importance = TRUE)
-pred_rf <- predict(rf_mod, newdata = test)
-rf_perf <- postResample(pred_rf, test$price)
-cat("Random Forest performance:\n")
-print(rf_perf)
+rf_mod <- randomForest(log_price ~ ., data = train, ntree = 200, importance = TRUE)
+pred_rf_log <- predict(rf_mod, newdata = test)
+pred_rf_real <- exp(pred_rf_log) - 1
+
+rf_perf <- postResample(pred_rf_real, actual_test_real)
+cat("Random Forest performance (Real $ Scale):\n"); print(rf_perf)
+
 importance(rf_mod)
 varImpPlot(rf_mod)
+
+# Naive Bayes (Classification on Price Bucket)
+cat("\n=== Naive Bayes Classification (Predicting Price Range) ===\n")
+# Prepare data for classification
+nb_vars <- c("price_bucket", "horsepower", "enginesize", "curbweight", "citympg", "highwaympg", "carwidth", "carlength")
+nb_df <- df %>% select(all_of(nb_vars)) %>% na.omit()
+
+set.seed(123)
+nb_index <- createDataPartition(nb_df$price_bucket, p = 0.8, list = FALSE)
+nb_train <- nb_df[nb_index, ]
+nb_test  <- nb_df[-nb_index, ]
+
+nb_mod <- naiveBayes(price_bucket ~ ., data = nb_train, usekernel = TRUE)
+nb_pred <- predict(nb_mod, nb_test)
+
+nb_cm <- confusionMatrix(nb_pred, nb_test$price_bucket)
+print(nb_cm)
+
+# SVM Regression (Tuned)
+cat("\n=== SVM Regression (Tuned) ===\n")
+
+# Tune SVM to find best Cost & Gamma
+tune_res <- tune(svm, log_price ~ ., data = train, 
+                 kernel = "radial", 
+                 ranges = list(cost = c(0.1, 1, 10, 100), 
+                               gamma = c(0.01, 0.1, 0.5, 1)))
+
+print(tune_res$best.parameters)
+svm_best <- tune_res$best.model
+
+pred_svm_log <- predict(svm_best, newdata = test)
+pred_svm_real <- exp(pred_svm_log) - 1
+
+svm_perf <- postResample(pred_svm_real, actual_test_real)
+cat("Tuned SVM performance (Real $ Scale):\n"); print(svm_perf)
 
 # ---------------------------
 # 10. Clustering (K-Means)
@@ -455,7 +496,6 @@ inspect(sort(rules, by = "lift")[1:20])
 write_csv(df, "car_prices_cleaned.csv")
 write_csv(ml_data, "car_prices_ml_ready.csv")
 saveRDS(lm_mod, "lm_model.rds")
-saveRDS(lasso_mod, "lasso_model.rds")
 saveRDS(tree_mod, "tree_model.rds")
 saveRDS(rf_mod, "rf_model.rds")
 
