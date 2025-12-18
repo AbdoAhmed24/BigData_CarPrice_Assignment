@@ -164,34 +164,112 @@ corrplot(cor_mat, method = "color", type = "lower", tl.cex = 0.7)
 # ---------------------------
 # 7. Hypothesis testing
 # ---------------------------
-if (all(c("fueltype", "price") %in% names(df))) {
-  fuel_counts <- df %>% count(fueltype, sort = TRUE)
-  top2fuel <- fuel_counts$fueltype[1:2]
-  cat("Top 2 fuels used for t-test:", top2fuel, "\n")
-  res_t <- t.test(price ~ fueltype, data = df %>% filter(fueltype %in% top2fuel))
-  print(res_t)
+# ---------------------------
+# H1: Does fuel type affect price? (t-test)
+# ---------------------------
+
+# Use only gas and diesel
+fuel_df <- df %>% filter(fueltype %in% c("gas", "diesel"))
+
+# Check group sizes
+table(fuel_df$fueltype)
+
+# Two-sample t-test (Welch by default – safer)
+t_fuel <- t.test(price ~ fueltype, data = fuel_df)
+
+cat("\n=== T-Test: Price vs Fuel Type ===\n")
+print(t_fuel)
+
+# Interpretation helper
+if (t_fuel$p.value < 0.05) {
+  cat("Conclusion: Reject H0 → Fuel type has a significant effect on price.\n")
+} else {
+  cat("Conclusion: Fail to reject H0 → No significant price difference.\n")
 }
 
-if ("carbody" %in% names(df)) {
-  aov_res <- aov(price ~ carbody, data = df)
-  print(summary(aov_res))
-  if (summary(aov_res)[[1]]$`Pr(>F)`[1] < 0.05) {
-    print(TukeyHSD(aov_res))
-  }
+#H1Conclusion: Fail to reject H0 → No significant price difference
+
+
+# ---------------------------
+# H2: Does car body type affect price? (ANOVA)
+# ---------------------------
+
+anova_body <- aov(price ~ carbody, data = df)
+
+cat("\n=== ANOVA: Price vs Car Body ===\n")
+summary(anova_body)
+
+# Post-hoc test only if ANOVA is significant
+if (summary(anova_body)[[1]]$`Pr(>F)`[1] < 0.05) {
+  cat("\nPost-hoc Tukey Test Results:\n")
+  print(TukeyHSD(anova_body))
 }
 
-if (all(c("brand", "drivewheel") %in% names(df))) {
-  topb <- df %>%
-    count(brand, sort = TRUE) %>%
-    slice(1:6) %>%
-    pull(brand)
-  tab <- table(
-    df %>% filter(brand %in% topb) %>% pull(brand),
-    df %>% filter(brand %in% topb) %>% pull(drivewheel)
-  )
-  print(tab)
-  print(chisq.test(tab))
+
+#H2conclusion :Reject H₀ Car body type has a statistically significant effect on car price.
+#------
+#Comparison	Interpretation
+#hatchback – convertible	Hatchbacks are much cheaper
+#wagon – convertible	    Wagons are cheaper
+#hatchback – hardtop	    Hatchbacks are cheaper
+#wagon – hardtop	        Wagons are cheaper
+#sedan – hatchback	      Sedans are more expensive
+#------
+
+
+# ---------------------------
+# H3: Is horsepower related to price? (Correlation test)
+# ---------------------------
+
+cor_hp <- cor.test(df$horsepower, df$price, method = "pearson")
+
+cat("\n=== Correlation Test: Horsepower vs Price ===\n")
+print(cor_hp)
+
+if (cor_hp$p.value < 0.05) {
+  cat("Conclusion: Significant relationship exists.\n")
+} else {
+  cat("Conclusion: No significant relationship.\n")
 }
+
+#h3 Conclusion: Significant relationship exists.
+
+
+
+# ---------------------------
+# H4: Does drivewheel affect price? (ANOVA)
+# ---------------------------
+anova_drive <- aov(price ~ drivewheel, data = df)
+cat("\n=== H4: Price vs Drivewheel (ANOVA) ===\n")
+summary(anova_drive)
+if (summary(anova_drive)[[1]]$`Pr(>F)`[1] < 0.05) {
+  cat("\nPost-hoc Tukey Test Results:\n")
+  print(TukeyHSD(anova_drive))
+}
+
+# ---------------------------
+# H5: Does engine type affect price? (ANOVA)
+# ---------------------------
+anova_engtype <- aov(price ~ enginetype, data = df)
+cat("\n=== H5: Price vs Engine Type (ANOVA) ===\n")
+summary(anova_engtype)
+if (summary(anova_engtype)[[1]]$`Pr(>F)`[1] < 0.05) {
+  cat("\nPost-hoc Tukey Test Results:\n")
+  print(TukeyHSD(anova_engtype))
+}
+
+# ---------------------------
+# H6: Does cylinder number affect price? (ANOVA)
+# ---------------------------
+anova_cyl <- aov(price ~ cylindernumber, data = df)
+cat("\n=== H6: Price vs Cylinder Number (ANOVA) ===\n")
+summary(anova_cyl)
+if (summary(anova_cyl)[[1]]$`Pr(>F)`[1] < 0.05) {
+  cat("\nPost-hoc Tukey Test Results:\n")
+  print(TukeyHSD(anova_cyl))
+}
+
+
 
 # ---------------------------
 # 8. Prepare dataset for ML
