@@ -415,9 +415,6 @@ p_elbow <- ggplot(elbow_data, aes(x = Clusters, y = WSS)) +
   theme(plot.title = element_text(hjust = 0.5))
 print(p_elbow)
 
-# Silhouette method for validation
-fviz_nbclust(clus_scaled, kmeans, method = "silhouette")
-
 # Step 4: Apply K-Means Clustering (k=3 based on elbow/silhouette)
 k <- 2
 set.seed(123)
@@ -461,9 +458,6 @@ p_pca <- ggplot(pca_df, aes(x = PC1, y = PC2, color = Cluster)) +
   theme_minimal() +
   theme(plot.title = element_text(hjust = 0.5))
 print(p_pca)
-
-# Factoextra cluster visualization
-fviz_cluster(km, data = clus_scaled, main = "K-Means Cluster Visualization")
 
 # Feature pair visualizations
 clus_df$cluster <- as.factor(km$cluster)
